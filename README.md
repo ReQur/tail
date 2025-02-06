@@ -29,7 +29,7 @@ See [API documentation](https://pkg.go.dev/github.com/nxadm/tail#section-documen
 
 ## Installing
 
-    go get github.com/nxadm/tail/...
+    go get github.com/ReQur/tail/...
 
 ## History
 

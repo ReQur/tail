@@ -7,9 +7,9 @@ package main
 import (
 	"flag"
 	"fmt"
-    "io"
+	"github.com/ReQur/tail"
+	"io"
 	"os"
-	"github.com/nxadm/tail"
 )
 
 func args2config() (tail.Config, int64) {
