@@ -1,4 +1,4 @@
-module github.com/nxadm/tail
+module github.com/ReQur/tail
 
 go 1.13
 
