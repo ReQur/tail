@@ -74,7 +74,8 @@ type Config struct {
 	ReOpen    bool      // Reopen recreated files (tail -F)
 	MustExist bool      // Fail early if the file does not exist
 	Poll      bool      // Poll for file changes instead of using the default inotify
-	Pipe      bool      // The file is a named pipe (mkfifo)
+	Rotatable bool
+	Pipe      bool // The file is a named pipe (mkfifo)
 
 	// Generic IO
 	Follow        bool // Continue looking for new lines (tail -f)
@@ -142,8 +143,11 @@ func TailFile(filename string, config Config) (*Tail, error) {
 
 	if t.Poll {
 		t.watcher = watch.NewPollingFileWatcher(filename)
+	} else if t.Rotatable {
+		t.watcher = watch.NewRotatingFileWatcher(filename)
 	} else {
 		t.watcher = watch.NewInotifyFileWatcher(filename)
+
 	}
 
 	if t.MustExist {

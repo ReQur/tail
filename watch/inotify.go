@@ -6,10 +6,10 @@ package watch
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
-	"time"
+
+	"github.com/ReQur/tail/util"
 
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/tomb.v1"
@@ -67,78 +67,67 @@ func (fw *InotifyFileWatcher) BlockUntilExists(t *tomb.Tomb) error {
 }
 
 func (fw *InotifyFileWatcher) ChangeEvents(t *tomb.Tomb, pos int64) (*FileChanges, error) {
-	watcher, err := fsnotify.NewWatcher()
+	err := Watch(fw.Filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create watcher: %v", err)
-	}
-
-	dir := filepath.Dir(fw.Filename)
-	if err := watcher.Add(dir); err != nil {
-		watcher.Close()
-		return nil, fmt.Errorf("failed to add watch: %v", err)
+		return nil, err
 	}
 
 	changes := NewFileChanges()
 	fw.Size = pos
 
 	go func() {
-		defer watcher.Close()
+
+		events := Events(fw.Filename)
 
 		for {
+			prevSize := fw.Size
+
+			var evt fsnotify.Event
+			var ok bool
+
 			select {
-			case event, ok := <-watcher.Events:
+			case evt, ok = <-events:
 				if !ok {
+					RemoveWatch(fw.Filename)
 					return
 				}
+			case <-t.Dying():
+				RemoveWatch(fw.Filename)
+				return
+			}
 
-				if event.Name != fw.Filename {
-					continue
-				}
+			switch {
+			case evt.Op&fsnotify.Remove == fsnotify.Remove:
+				fallthrough
 
-				if event.Op&fsnotify.Remove == fsnotify.Remove {
-					time.Sleep(100 * time.Millisecond)
+			case evt.Op&fsnotify.Rename == fsnotify.Rename:
+				RemoveWatch(fw.Filename)
+				changes.NotifyDeleted()
+				return
 
-					if _, err := os.Lstat(fw.Filename); err != nil {
-						if os.IsNotExist(err) {
-							changes.NotifyDeleted()
-							return
-						}
-						log.Printf("Failed to stat file %v: %v", fw.Filename, err)
-						continue
-					}
+			//With an open fd, unlink(fd) - inotify returns IN_ATTRIB (==fsnotify.Chmod)
+			case evt.Op&fsnotify.Chmod == fsnotify.Chmod:
+				fallthrough
 
-					log.Printf("File %s has been replaced, following new file", fw.Filename)
-					changes.NotifyModified()
-					fw.Size = 0
-					continue
-				}
-
+			case evt.Op&fsnotify.Write == fsnotify.Write:
 				fi, err := os.Stat(fw.Filename)
 				if err != nil {
 					if os.IsNotExist(err) {
+						RemoveWatch(fw.Filename)
 						changes.NotifyDeleted()
 						return
 					}
-					log.Printf("Failed to stat file %v: %v", fw.Filename, err)
-					continue
+					// XXX: report this error back to the user
+					util.Fatal("Failed to stat file %v: %v", fw.Filename, err)
 				}
+				fw.Size = fi.Size()
 
-				newSize := fi.Size()
-				if fw.Size > 0 && fw.Size > newSize {
+				if prevSize > 0 && prevSize > fw.Size {
 					changes.NotifyTruncated()
-				} else if newSize > fw.Size {
+				} else {
 					changes.NotifyModified()
 				}
-				fw.Size = newSize
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Printf("Watcher error: %v", err)
-
-			case <-t.Dying():
-				return
+				prevSize = fw.Size
 			}
 		}
 	}()
